@@ -1,6 +1,6 @@
 // src/App.jsx
 import { useState } from "react";
-import { fetchAndParseRecipe } from "./parseRecipe.js";
+import { fetchAndParseRecipe, normalizeIngredientName } from "./parseRecipe.js";
 
 const DAYS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 const STORAGE_KEY = "boodschapv1";
@@ -27,9 +27,10 @@ function reducer(state, action) {
       const map = {};
       s.week.filter(Boolean).forEach(r => {
         r.ingredients.forEach(ing => {
-          const k = ing.name.toLowerCase();
+          // Use normalized name as key so "ui (gesneden)" and "ui" are combined
+          const k = (ing.normalizedName || normalizeIngredientName(ing.name));
           const scaled = Math.round(ing.amount * (s.persons / r.recipePersons) * 100) / 100;
-          if (!map[k]) map[k] = { name: ing.name, amount: 0, unit: ing.unit, checked: false };
+          if (!map[k]) map[k] = { name: ing.name, normalizedName: k, amount: 0, unit: ing.unit, checked: false };
           map[k].amount += scaled;
         });
       });
@@ -41,8 +42,8 @@ function reducer(state, action) {
     case "MARK_DONE": {
       const inv = [...s.inventory];
       s.shopping.filter(x => x.checked).forEach(item => {
-        const k = item.name.toLowerCase();
-        const i = inv.findIndex(v => v.name.toLowerCase() === k);
+        const k = item.normalizedName || normalizeIngredientName(item.name);
+        const i = inv.findIndex(v => normalizeIngredientName(v.name) === k);
         if (i >= 0) inv[i] = { ...inv[i], qty: Math.round((inv[i].qty + item.amount) * 10) / 10 };
         else inv.push({ name: item.name, qty: item.amount, unit: item.unit });
       });
@@ -228,14 +229,14 @@ function LijstScreen({ state, dispatch }) {
   );
 
   const invMap = {};
-  state.inventory.forEach(v => { invMap[v.name.toLowerCase()] = v; });
+  state.inventory.forEach(v => { invMap[normalizeIngredientName(v.name)] = v; });
   const done = state.shopping.filter(x => x.checked).length;
   const toGet = state.shopping.filter(x => !x.checked);
   const got = state.shopping.filter(x => x.checked);
 
   function Row({ item }) {
     const idx = state.shopping.indexOf(item);
-    const iv = invMap[item.name.toLowerCase()];
+    const iv = invMap[item.normalizedName || normalizeIngredientName(item.name)];
     let pill = null;
     if (iv) {
       if (iv.qty >= item.amount) pill = <Pill type="ok">Op voorraad</Pill>;

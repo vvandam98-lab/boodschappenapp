@@ -5,6 +5,31 @@ const FRACS = {
   "⅛":0.125,"⅜":0.375,"⅝":0.625,"⅞":0.875
 };
 
+// Strips preparation notes from ingredient names so they can be matched.
+// "ui (in ringen gesneden)" → "ui"
+// "knoflook, fijngehakt" → "knoflook"
+// "tomaten, in blokjes" → "tomaten"
+export function normalizeIngredientName(name) {
+  if (!name) return "";
+  let n = name.toLowerCase().trim();
+  // Remove anything in parentheses: "ui (gesneden)" → "ui"
+  n = n.replace(/\s*\(.*?\)/g, "");
+  // Remove anything after comma: "knoflook, fijngehakt" → "knoflook"
+  n = n.replace(/\s*,.*$/, "");
+  // Remove anything after common prep words
+  const prepWords = [
+    "gesneden", "gehakt", "geraspt", "geklopt", "gepeld", "gewassen",
+    "gehalveerd", "in ringen", "in blokjes", "in reepjes", "fijngesneden",
+    "fijngehakt", "grof", "fijn", "vers", "gedroogd", "gekookt", "rauw",
+    "op kamertemperatuur", "zacht", "gesmolten", "losgeklopt"
+  ];
+  for (const w of prepWords) {
+    const idx = n.indexOf(" " + w);
+    if (idx > 0) n = n.slice(0, idx);
+  }
+  return n.trim();
+}
+
 export function parseIngStr(raw) {
   if (!raw || typeof raw !== "string") return null;
   let s = raw.trim().replace(/\u00a0/g, " ");
@@ -12,9 +37,10 @@ export function parseIngStr(raw) {
   const m = s.match(/^(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)\s*([a-zA-Zµ]{1,8}\.?)?\s+(.+)$/);
   if (m) {
     const amt = parseFloat(m[1].split(/[-–]/)[0].replace(",", ".")) || 1;
-    return { name: m[3].trim(), amount: amt, unit: m[2] || "stuks" };
+    const rawName = m[3].trim();
+    return { name: rawName, normalizedName: normalizeIngredientName(rawName), amount: amt, unit: m[2] || "stuks" };
   }
-  return { name: s, amount: 1, unit: "stuks" };
+  return { name: s, normalizedName: normalizeIngredientName(s), amount: 1, unit: "stuks" };
 }
 
 function parseYield(y) {
@@ -88,18 +114,14 @@ export function fromHtmlSelectors(html) {
 }
 
 export async function fetchAndParseRecipe(url) {
-  // Call our own Vercel serverless function — no CORS issues
   const apiUrl = `/api/fetch-recipe?url=${encodeURIComponent(url)}`;
   const res = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
-
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Fout ${res.status}`);
   }
-
   const html = await res.text();
   if (!html || html.length < 100) throw new Error("Lege pagina ontvangen");
-
   const recipe = fromJsonLd(html) || fromHtmlSelectors(html);
   if (recipe) return recipe;
   throw new Error("Geen receptgegevens gevonden op deze pagina. Niet alle sites worden ondersteund.");
