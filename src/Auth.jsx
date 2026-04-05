@@ -40,26 +40,34 @@ function Inp({ value, onChange, placeholder, style = {} }) {
 function LoginScreen({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [checking, setChecking] = useState(true);
 
-  // Check for redirect result on mount (mobile flow)
-  useState(() => {
+  // On mount: check if we just came back from a Google redirect
+  useEffect(() => {
     const auth = getAuthInstance();
-    getRedirectResult(auth).then(result => {
-      if (result?.user) onLogin(result.user);
-    }).catch(() => {});
-  });
+    getRedirectResult(auth)
+      .then(result => {
+        if (result?.user) {
+          onLogin(result.user);
+        } else {
+          setChecking(false);
+        }
+      })
+      .catch(e => {
+        console.error("Redirect result error:", e);
+        setChecking(false);
+      });
+  }, []);
 
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
       const auth = getAuthInstance();
       const provider = new GoogleAuthProvider();
-      // Use redirect on mobile, popup on desktop
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (isMobile) {
         await signInWithRedirect(auth, provider);
-        // Page will reload after redirect — no further code runs
-        return;
+        return; // page reloads, code below never runs
       } else {
         const result = await signInWithPopup(auth, provider);
         onLogin(result.user);
@@ -68,6 +76,16 @@ function LoginScreen({ onLogin }) {
       setErr("Inloggen mislukt. Probeer opnieuw.");
       setBusy(false);
     }
+  }
+
+  // Show loading while checking redirect result
+  if (checking) {
+    return (
+      <div style={{ maxWidth: 380, margin: "0 auto", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", gap: 16 }}>
+        <div style={{ fontSize: 24, fontWeight: 700 }}>bood<span style={{ color: G }}>schappen</span>app</div>
+        <div style={{ fontSize: 13, color: "#aaa" }}>Inloggen...</div>
+      </div>
+    );
   }
 
   return (
