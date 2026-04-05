@@ -39,6 +39,20 @@ function reducer(state, action) {
     }
     case "TOGGLE_ITEM": s.shopping = s.shopping.map((x, i) => i === action.idx ? { ...x, checked: !x.checked } : x); break;
     case "RESET_CHECKED": s.shopping = s.shopping.map(x => ({ ...x, checked: false })); break;
+    case "ADD_SHOPPING_ITEM": {
+      // If item already on list (by normalized name), add the amounts together
+      const k = normalizeIngredientName(action.item.name);
+      const i = s.shopping.findIndex(x => (x.normalizedName || normalizeIngredientName(x.name)) === k);
+      if (i >= 0) {
+        s.shopping = s.shopping.map((x, idx) => idx === i
+          ? { ...x, amount: Math.round((x.amount + action.item.amount) * 10) / 10 }
+          : x);
+      } else {
+        s.shopping = [...s.shopping, { ...action.item, normalizedName: k, checked: false }];
+      }
+      break;
+    }
+    case "REMOVE_SHOPPING_ITEM": s.shopping = s.shopping.filter((_, i) => i !== action.idx); break;
     case "MARK_DONE": {
       const inv = [...s.inventory];
       s.shopping.filter(x => x.checked).forEach(item => {
@@ -222,11 +236,18 @@ function WeekScreen({ state, dispatch }) {
 
 // ─── Lijst Screen ─────────────────────────────────────────────────────────────
 function LijstScreen({ state, dispatch }) {
-  if (!state.shopping.length) return (
-    <div style={{ textAlign: "center", padding: "3rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>
-      Geen boodschappenlijst.<br />Voeg recepten toe aan de week<br />en klik "Maak boodschappenlijst".
-    </div>
-  );
+  const [addName, setAddName] = useState("");
+  const [addQty, setAddQty] = useState("");
+  const [addUnit, setAddUnit] = useState("");
+
+  function handleAdd() {
+    if (!addName.trim()) return;
+    dispatch({
+      type: "ADD_SHOPPING_ITEM",
+      item: { name: addName.trim(), amount: parseFloat(addQty) || 1, unit: addUnit.trim() || "stuks" }
+    });
+    setAddName(""); setAddQty(""); setAddUnit("");
+  }
 
   const invMap = {};
   state.inventory.forEach(v => { invMap[normalizeIngredientName(v.name)] = v; });
@@ -244,30 +265,60 @@ function LijstScreen({ state, dispatch }) {
       else pill = <Pill type="no">Nodig</Pill>;
     }
     return (
-      <div onClick={() => dispatch({ type: "TOGGLE_ITEM", idx })}
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 8, marginBottom: 6, cursor: "pointer", opacity: item.checked ? 0.4 : 1, userSelect: "none" }}>
-        <div style={{ width: 19, height: 19, borderRadius: "50%", flexShrink: 0, background: item.checked ? G : "none", border: item.checked ? "none" : "1.5px solid #ccc", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {item.checked && <svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <div onClick={() => dispatch({ type: "TOGGLE_ITEM", idx })}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 8, cursor: "pointer", opacity: item.checked ? 0.4 : 1, userSelect: "none", flex: 1 }}>
+          <div style={{ width: 19, height: 19, borderRadius: "50%", flexShrink: 0, background: item.checked ? G : "none", border: item.checked ? "none" : "1.5px solid #ccc", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {item.checked && <svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+          </div>
+          <span style={{ flex: 1, fontSize: 14, textDecoration: item.checked ? "line-through" : "none" }}>{item.name}</span>
+          <span style={{ fontSize: 13, color: "#999", whiteSpace: "nowrap" }}>{item.amount} {item.unit}</span>
+          {pill}
         </div>
-        <span style={{ flex: 1, fontSize: 14, textDecoration: item.checked ? "line-through" : "none" }}>{item.name}</span>
-        <span style={{ fontSize: 13, color: "#999", whiteSpace: "nowrap" }}>{item.amount} {item.unit}</span>
-        {pill}
+        <button onClick={() => dispatch({ type: "REMOVE_SHOPPING_ITEM", idx })}
+          style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px", flexShrink: 0, fontFamily: "inherit" }}>×</button>
       </div>
     );
   }
 
   return (
     <div style={{ padding: "1rem" }}>
-      <div style={{ background: GL, borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: GM }}>Afgestreept</span>
-        <strong style={{ fontSize: 15, color: GD }}>{done} / {state.shopping.length}</strong>
-      </div>
+      {state.shopping.length > 0 && (
+        <div style={{ background: GL, borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: GM }}>Afgestreept</span>
+          <strong style={{ fontSize: 15, color: GD }}>{done} / {state.shopping.length}</strong>
+        </div>
+      )}
+
+      {/* Manual add */}
+      <Card mb={12}>
+        <CTitle>Zelf toevoegen</CTitle>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Inp value={addName} onChange={e => setAddName(e.target.value)} placeholder="Product" onKeyDown={e => e.key === "Enter" && handleAdd()} style={{ flex: 2 }} />
+          <Inp value={addQty} onChange={e => setAddQty(e.target.value)} placeholder="Hv." type="number" style={{ flex: 1, maxWidth: 70 }} />
+          <Inp value={addUnit} onChange={e => setAddUnit(e.target.value)} placeholder="eenheid" style={{ flex: 1, maxWidth: 75 }} />
+          <Btn onClick={handleAdd}>+</Btn>
+        </div>
+        <div style={{ fontSize: 11, color: "#bbb", marginTop: 7 }}>
+          Staat het product al op de lijst? Dan wordt het opgeteld.
+        </div>
+      </Card>
+
+      {!state.shopping.length && (
+        <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>
+          Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.
+        </div>
+      )}
+
       {toGet.length > 0 && <><SLabel>Nog te halen</SLabel>{toGet.map((x, i) => <Row key={i} item={x} />)}</>}
       {got.length > 0 && <><SLabel mt={20}>In het karretje</SLabel>{got.map((x, i) => <Row key={i} item={x} />)}</>}
-      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-        <Btn ghost full onClick={() => dispatch({ type: "RESET_CHECKED" })}>Alles terugzetten</Btn>
-        <Btn full onClick={() => dispatch({ type: "MARK_DONE" })}>Boodschappen gedaan — voorraad bijwerken</Btn>
-      </div>
+
+      {state.shopping.length > 0 && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <Btn ghost full onClick={() => dispatch({ type: "RESET_CHECKED" })}>Alles terugzetten</Btn>
+          <Btn full onClick={() => dispatch({ type: "MARK_DONE" })}>Boodschappen gedaan — voorraad bijwerken</Btn>
+        </div>
+      )}
     </div>
   );
 }
