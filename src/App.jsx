@@ -124,11 +124,16 @@ function ProgBar({ v }) {
   </div>;
 }
 
-function SyncDot({ synced }) {
+function SyncDot({ status }) {
+  const ok = status === "synced";
+  const err = status === "error";
+  const color = err ? "#dc2626" : ok ? "#639922" : "#f59e0b";
+  const label = err ? "verbindingsfout" : ok ? "gesynchroniseerd" : "synchroniseert...";
+  const textColor = err ? "#991b1b" : ok ? GM : "#92400e";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-      <div style={{ width: 7, height: 7, borderRadius: "50%", background: synced ? "#639922" : "#f59e0b", transition: "background 0.5s" }} />
-      <span style={{ fontSize: 11, color: synced ? GM : "#92400e" }}>{synced ? "gesynchroniseerd" : "verbinding maken..."}</span>
+      <div style={{ width: 7, height: 7, borderRadius: "50%", background: color, transition: "background 0.5s" }} />
+      <span style={{ fontSize: 11, color: textColor }}>{label}</span>
     </div>
   );
 }
@@ -344,7 +349,7 @@ function VoorraadScreen({ state, dispatch }) {
 // ─── App Root ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [state, rawDispatch] = useState(() => defaultState());
-  const [synced, setSynced] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("connecting");
   const [hhModal, setHhModal] = useState(false);
   const [tmpP, setTmpP] = useState(2);
   const pushTimer = useRef(null);
@@ -352,11 +357,11 @@ export default function App() {
   // When Firebase sends us an update, apply it
   const onRemoteUpdate = useCallback((data) => {
     rawDispatch(prev => reducer(prev, { type: "REMOTE_UPDATE", data }));
-    setSynced(true);
+    setSyncStatus("synced");
   }, []);
 
-  const onSyncStatus = useCallback((status) => setSynced(status), []);
-  const { pushToFirebase } = useFirebaseSync(state, onRemoteUpdate, onSyncStatus);
+  const onSyncStatus = useCallback((status) => setSyncStatus(status), []);
+  const { pushToFirebase } = useFirebaseSync(onRemoteUpdate, onSyncStatus);
 
   // Dispatch: update local state, then debounce push to Firebase
   function dispatch(action) {
