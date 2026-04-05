@@ -1,7 +1,7 @@
 // src/Auth.jsx — Login & household setup screens
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
 import { FIREBASE_CONFIG } from "./firebase.js";
 import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta } from "./useSync.js";
 
@@ -41,17 +41,33 @@ function LoginScreen({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  // Check for redirect result on mount (mobile flow)
+  useState(() => {
+    const auth = getAuthInstance();
+    getRedirectResult(auth).then(result => {
+      if (result?.user) onLogin(result.user);
+    }).catch(() => {});
+  });
+
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
       const auth = getAuthInstance();
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      onLogin(result.user);
+      // Use redirect on mobile, popup on desktop
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, provider);
+        // Page will reload after redirect — no further code runs
+        return;
+      } else {
+        const result = await signInWithPopup(auth, provider);
+        onLogin(result.user);
+      }
     } catch (e) {
       setErr("Inloggen mislukt. Probeer opnieuw.");
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
