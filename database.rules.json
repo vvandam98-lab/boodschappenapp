@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "households": {
+      "$householdId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "householdMeta": {
+      "$householdId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "inviteCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}

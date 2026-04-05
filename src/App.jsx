@@ -2,6 +2,7 @@
 import { useState, useCallback, useRef } from "react";
 import { fetchAndParseRecipe, normalizeIngredientName } from "./parseRecipe.js";
 import { useFirebaseSync } from "./useSync.js";
+import { AuthGate, HouseholdModal } from "./Auth.jsx";
 
 const DAYS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11", GD = "#27500A";
@@ -17,17 +18,8 @@ function reducer(state, action) {
   const s = { ...state, inventory: [...state.inventory], shopping: [...state.shopping], week: [...state.week], recipes: [...state.recipes] };
   switch (action.type) {
     case "REMOTE_UPDATE": {
-      // Merge remote data into local state, but keep the local tab (each person navigates independently)
-      const remote = action.data;
-      return {
-        ...s,
-        persons:   remote.persons   ?? s.persons,
-        week:      remote.week      ?? s.week,
-        recipes:   remote.recipes   ?? s.recipes,
-        inventory: remote.inventory ?? s.inventory,
-        shopping:  remote.shopping  ?? s.shopping,
-        tab: s.tab,
-      };
+      const d = action.data;
+      return { ...s, persons: d.persons ?? s.persons, week: d.week ?? s.week, recipes: d.recipes ?? s.recipes, inventory: d.inventory ?? s.inventory, shopping: d.shopping ?? s.shopping, tab: s.tab };
     }
     case "SET_TAB": s.tab = action.tab; break;
     case "SET_PERSONS": s.persons = Math.max(1, action.persons); break;
@@ -52,13 +44,8 @@ function reducer(state, action) {
     case "ADD_SHOPPING_ITEM": {
       const k = normalizeIngredientName(action.item.name);
       const i = s.shopping.findIndex(x => (x.normalizedName || normalizeIngredientName(x.name)) === k);
-      if (i >= 0) {
-        s.shopping = s.shopping.map((x, idx) => idx === i
-          ? { ...x, amount: Math.round((x.amount + action.item.amount) * 10) / 10 }
-          : x);
-      } else {
-        s.shopping = [...s.shopping, { ...action.item, normalizedName: k, checked: false }];
-      }
+      if (i >= 0) s.shopping = s.shopping.map((x, idx) => idx === i ? { ...x, amount: Math.round((x.amount + action.item.amount) * 10) / 10 } : x);
+      else s.shopping = [...s.shopping, { ...action.item, normalizedName: k, checked: false }];
       break;
     }
     case "REMOVE_SHOPPING_ITEM": s.shopping = s.shopping.filter((_, i) => i !== action.idx); break;
@@ -70,8 +57,7 @@ function reducer(state, action) {
         if (i >= 0) inv[i] = { ...inv[i], qty: Math.round((inv[i].qty + item.amount) * 10) / 10 };
         else inv.push({ name: item.name, qty: item.amount, unit: item.unit });
       });
-      s.inventory = inv;
-      s.shopping = s.shopping.filter(x => !x.checked);
+      s.inventory = inv; s.shopping = s.shopping.filter(x => !x.checked);
       break;
     }
     case "ADD_INVENTORY": {
@@ -92,7 +78,7 @@ function reducer(state, action) {
 function Btn({ children, onClick, disabled, full, ghost }) {
   return ghost
     ? <button onClick={onClick} disabled={disabled} style={{ background: "none", border: "0.5px solid #ccc", borderRadius: 8, color: "#666", padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined }}>{children}</button>
-    : <button onClick={onClick} disabled={disabled} style={{ background: disabled ? "#eee" : G, color: disabled ? "#aaa" : "#fff", border: "none", borderRadius: 8, padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined, transition: "background 0.15s" }}>{children}</button>;
+    : <button onClick={onClick} disabled={disabled} style={{ background: disabled ? "#eee" : G, color: disabled ? "#aaa" : "#fff", border: "none", borderRadius: 8, padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined }}>{children}</button>;
 }
 
 function Inp({ value, onChange, placeholder, onKeyDown, type = "text", style = {} }) {
@@ -139,7 +125,7 @@ function ProgBar({ v }) {
 function SyncDot({ status }) {
   const ok = status === "synced";
   const err = status === "error";
-  const color = err ? "#dc2626" : ok ? "#639922" : "#f59e0b";
+  const color = err ? "#dc2626" : ok ? G : "#f59e0b";
   const label = err ? "verbindingsfout" : ok ? "gesynchroniseerd" : "synchroniseert...";
   const textColor = err ? "#991b1b" : ok ? GM : "#92400e";
   return (
@@ -171,14 +157,9 @@ function WeekScreen({ state, dispatch }) {
       setProg(100);
       const sc = state.persons / recipe.recipePersons;
       setMsg(`✓ "${recipe.name}" — voor ${recipe.recipePersons} personen gevonden.`);
-      setInfo(sc === 1
-        ? `Jij kookt ook voor ${state.persons} personen — geen aanpassing nodig.`
-        : `Recept voor ${recipe.recipePersons} pers. → ×${sc.toFixed(2)} voor jouw ${state.persons} personen.`);
-      setUrl("");
-      setTimeout(() => setProg(0), 700);
-    } catch (e) {
-      setProg(0); setMsg(`Fout: ${e.message}`); setErr(true);
-    }
+      setInfo(sc === 1 ? `Jij kookt ook voor ${state.persons} personen — geen aanpassing nodig.` : `Recept voor ${recipe.recipePersons} pers. → ×${sc.toFixed(2)} voor jouw ${state.persons} personen.`);
+      setUrl(""); setTimeout(() => setProg(0), 700);
+    } catch (e) { setProg(0); setMsg(`Fout: ${e.message}`); setErr(true); }
     setBusy(false);
   }
 
@@ -194,7 +175,6 @@ function WeekScreen({ state, dispatch }) {
         {msg && <div style={{ fontSize: 13, color: err ? "#dc2626" : "#777", padding: "6px 0", textAlign: "center" }}>{msg}</div>}
         {info && !err && <div style={{ background: GL, borderRadius: 8, padding: "9px 13px", fontSize: 13, color: GM, marginTop: 9, lineHeight: 1.55 }}>{info}</div>}
       </Card>
-
       <Card>
         <CTitle>Weekplanning</CTitle>
         {DAYS.map((d, i) => {
@@ -206,40 +186,30 @@ function WeekScreen({ state, dispatch }) {
               <div style={{ flex: 1, overflow: "hidden" }}>
                 {r ? <>
                   <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>
-                    {r.recipePersons} pers. → {sc === 1 ? "geen aanpassing" : `×${sc.toFixed(2)}`} voor {state.persons} pers.
-                  </div>
+                  <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>{r.recipePersons} pers. → {sc === 1 ? "geen aanpassing" : `×${sc.toFixed(2)}`} voor {state.persons} pers.</div>
                 </> : <span style={{ fontSize: 13, color: "#ccc" }}>Geen recept</span>}
               </div>
               {r
                 ? <button onClick={() => dispatch({ type: "REMOVE_DAY", idx: i })} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 3px", fontFamily: "inherit" }}>×</button>
-                : <button onClick={() => setDayModal(i)} style={{ fontSize: 11, color: G, background: "none", border: `0.5px solid #C0DD97`, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Voeg toe</button>
-              }
+                : <button onClick={() => setDayModal(i)} style={{ fontSize: 11, color: G, background: "none", border: `0.5px solid #C0DD97`, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Voeg toe</button>}
             </div>
           );
         })}
       </Card>
-
       <Btn full onClick={() => {
         if (!state.week.filter(Boolean).length) { alert("Voeg eerst recepten toe."); return; }
-        dispatch({ type: "BUILD_SHOPPING" });
-        dispatch({ type: "SET_TAB", tab: "lijst" });
+        dispatch({ type: "BUILD_SHOPPING" }); dispatch({ type: "SET_TAB", tab: "lijst" });
       }}>Maak boodschappenlijst voor deze week</Btn>
-
       <Modal show={dayModal !== null} title={dayModal !== null ? `Recept voor ${DAYS[dayModal]}dag` : ""} onClose={() => setDayModal(null)}>
-        {!state.recipes.length
-          ? <p style={{ fontSize: 13, color: "#bbb" }}>Analyseer eerst een recept-URL hierboven.</p>
+        {!state.recipes.length ? <p style={{ fontSize: 13, color: "#bbb" }}>Analyseer eerst een recept-URL hierboven.</p>
           : state.recipes.map((r, ri) => (
             <div key={ri} onClick={() => { dispatch({ type: "ASSIGN_DAY", idx: dayModal, recipe: r }); setDayModal(null); }}
               style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 13px", background: "#f8f8f6", borderRadius: 8, marginBottom: 8, cursor: "pointer", border: "0.5px solid rgba(0,0,0,0.08)" }}>
               <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{r.name}</span>
               <span style={{ fontSize: 12, color: G, background: GL, padding: "2px 9px", borderRadius: 20, fontWeight: 500 }}>{r.recipePersons} pers.</span>
             </div>
-          ))
-        }
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 13 }}>
-          <Btn ghost onClick={() => setDayModal(null)}>Sluiten</Btn>
-        </div>
+          ))}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 13 }}><Btn ghost onClick={() => setDayModal(null)}>Sluiten</Btn></div>
       </Modal>
     </div>
   );
@@ -247,9 +217,7 @@ function WeekScreen({ state, dispatch }) {
 
 // ─── Lijst Screen ─────────────────────────────────────────────────────────────
 function LijstScreen({ state, dispatch }) {
-  const [addName, setAddName] = useState("");
-  const [addQty, setAddQty] = useState("");
-  const [addUnit, setAddUnit] = useState("");
+  const [addName, setAddName] = useState(""), [addQty, setAddQty] = useState(""), [addUnit, setAddUnit] = useState("");
 
   function handleAdd() {
     if (!addName.trim()) return;
@@ -283,8 +251,7 @@ function LijstScreen({ state, dispatch }) {
           <span style={{ fontSize: 13, color: "#999", whiteSpace: "nowrap" }}>{item.amount} {item.unit}</span>
           {pill}
         </div>
-        <button onClick={() => dispatch({ type: "REMOVE_SHOPPING_ITEM", idx })}
-          style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px", flexShrink: 0, fontFamily: "inherit" }}>×</button>
+        <button onClick={() => dispatch({ type: "REMOVE_SHOPPING_ITEM", idx })} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px", flexShrink: 0, fontFamily: "inherit" }}>×</button>
       </div>
     );
   }
@@ -307,11 +274,7 @@ function LijstScreen({ state, dispatch }) {
         </div>
         <div style={{ fontSize: 11, color: "#bbb", marginTop: 7 }}>Staat het product al op de lijst? Dan wordt het opgeteld.</div>
       </Card>
-      {!state.shopping.length && (
-        <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>
-          Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.
-        </div>
-      )}
+      {!state.shopping.length && <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.</div>}
       {toGet.length > 0 && <><SLabel>Nog te halen</SLabel>{toGet.map((x, i) => <Row key={i} item={x} />)}</>}
       {got.length > 0 && <><SLabel mt={20}>In het karretje</SLabel>{got.map((x, i) => <Row key={i} item={x} />)}</>}
       {state.shopping.length > 0 && (
@@ -335,12 +298,10 @@ function VoorraadScreen({ state, dispatch }) {
         {state.inventory.map((v, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 8, marginBottom: 6 }}>
             <span style={{ flex: 1, fontSize: 14 }}>{v.name}</span>
-            <input type="number" value={v.qty} min={0} step={0.1}
-              onChange={e => dispatch({ type: "UPDATE_INVENTORY", idx: i, qty: parseFloat(e.target.value) || 0 })}
+            <input type="number" value={v.qty} min={0} step={0.1} onChange={e => dispatch({ type: "UPDATE_INVENTORY", idx: i, qty: parseFloat(e.target.value) || 0 })}
               style={{ width: 65, border: "0.5px solid #ddd", borderRadius: 6, padding: "4px 7px", fontSize: 13, textAlign: "center", background: "#f8f8f6", fontFamily: "inherit" }} />
             <span style={{ fontSize: 12, color: "#bbb", minWidth: 38 }}>{v.unit}</span>
-            <button onClick={() => dispatch({ type: "DELETE_INVENTORY", idx: i })}
-              style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1, fontFamily: "inherit" }}>×</button>
+            <button onClick={() => dispatch({ type: "DELETE_INVENTORY", idx: i })} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 18, lineHeight: 1, fontFamily: "inherit" }}>×</button>
           </div>
         ))}
         <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
@@ -358,57 +319,48 @@ function VoorraadScreen({ state, dispatch }) {
   );
 }
 
-// ─── App Root ─────────────────────────────────────────────────────────────────
-export default function App() {
+// ─── Main App (inside auth) ───────────────────────────────────────────────────
+function MainApp({ user, householdId }) {
   const [state, rawDispatch] = useState(() => defaultState());
   const [syncStatus, setSyncStatus] = useState("connecting");
   const [loaded, setLoaded] = useState(false);
   const [hhModal, setHhModal] = useState(false);
+  const [personsModal, setPersonsModal] = useState(false);
   const [tmpP, setTmpP] = useState(2);
   const pushTimer = useRef(null);
 
-  // When Firebase sends us an update, apply it
   const onRemoteUpdate = useCallback((data) => {
     rawDispatch(prev => reducer(prev, { type: "REMOTE_UPDATE", data }));
-    setLoaded(true);
-    setSyncStatus("synced");
+    setLoaded(true); setSyncStatus("synced");
   }, []);
 
   const onSyncStatus = useCallback((status) => {
     setSyncStatus(status);
-    // If we get synced status but onRemoteUpdate wasn't called (empty database), still mark as loaded
-    if (status === "synced") setLoaded(true);
-    if (status === "error") setLoaded(true); // show app even on error
+    if (status === "synced" || status === "error") setLoaded(true);
   }, []);
 
-  const { pushToFirebase } = useFirebaseSync(onRemoteUpdate, onSyncStatus);
+  const { pushToFirebase } = useFirebaseSync(householdId, onRemoteUpdate, onSyncStatus);
 
-  // Dispatch: update local state, then debounce push to Firebase
   function dispatch(action) {
     if (action.type === "SET_TAB") { rawDispatch(prev => reducer(prev, action)); return; }
     rawDispatch(prev => {
       const next = reducer(prev, action);
-      // Debounce: wait 400ms after last action before pushing (prevents spam on fast clicks)
       clearTimeout(pushTimer.current);
-      pushTimer.current = setTimeout(() => {
-        pushToFirebase(next);
-      }, 400);
+      pushTimer.current = setTimeout(() => pushToFirebase(next, householdId), 400);
       return next;
     });
   }
 
   const tab = state.tab || "week";
 
-  // Show loading spinner until Firebase has responded (prevents flash of empty state)
   if (!loaded) {
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f5f3", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#1a1a18" }}>bood<span style={{ color: G }}>schappen</span>app</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>bood<span style={{ color: G }}>schappen</span>app</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#999", fontSize: 13 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", animation: "pulse 1s infinite" }} />
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b" }} />
           Verbinden met database...
         </div>
-        <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
       </div>
     );
   }
@@ -416,12 +368,18 @@ export default function App() {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f5f3", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#1a1a18" }}>
       <div style={{ background: "#fff", borderBottom: "0.5px solid rgba(0,0,0,0.09)", padding: "1rem 1.25rem 0", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>bood<span style={{ color: G }}>schappen</span>app</div>
-          <button onClick={() => { setTmpP(state.persons); setHhModal(true); }}
-            style={{ background: GL, color: GM, fontSize: 12, padding: "5px 11px", borderRadius: 20, cursor: "pointer", border: "none", fontWeight: 500, fontFamily: "inherit" }}>
-            {state.persons} persoon{state.persons !== 1 ? "en" : ""}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => { setTmpP(state.persons); setPersonsModal(true); }}
+              style={{ background: GL, color: GM, fontSize: 12, padding: "5px 11px", borderRadius: 20, cursor: "pointer", border: "none", fontWeight: 500, fontFamily: "inherit" }}>
+              {state.persons} persoon{state.persons !== 1 ? "en" : ""}
+            </button>
+            {/* Avatar button → household modal */}
+            <button onClick={() => setHhModal(true)} style={{ width: 30, height: 30, borderRadius: "50%", background: GL, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600, color: GM }}>
+              {user.displayName?.charAt(0).toUpperCase()}
+            </button>
+          </div>
         </div>
         <div style={{ marginBottom: 8 }}><SyncDot status={syncStatus} /></div>
         <div style={{ display: "flex" }}>
@@ -438,7 +396,8 @@ export default function App() {
       {tab === "lijst" && <LijstScreen state={state} dispatch={dispatch} />}
       {tab === "voorraad" && <VoorraadScreen state={state} dispatch={dispatch} />}
 
-      <Modal show={hhModal} title="Huishouden instellen" onClose={() => setHhModal(false)}>
+      {/* Persons modal */}
+      <Modal show={personsModal} title="Huishouden instellen" onClose={() => setPersonsModal(false)}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "1rem 0" }}>
           <label style={{ flex: 1, fontSize: 14, color: "#666" }}>Aantal personen:</label>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -447,12 +406,24 @@ export default function App() {
             <button onClick={() => setTmpP(p => p + 1)} style={{ width: 32, height: 32, borderRadius: "50%", border: "0.5px solid #ddd", background: "#f8f8f6", fontSize: 17, cursor: "pointer", fontFamily: "inherit" }}>+</button>
           </div>
         </div>
-        <p style={{ fontSize: 12, color: "#bbb", lineHeight: 1.5 }}>Ingrediënten worden automatisch geschaald naar dit aantal op basis van het originele receptaantal.</p>
+        <p style={{ fontSize: 12, color: "#bbb", lineHeight: 1.5 }}>Ingrediënten worden automatisch geschaald naar dit aantal.</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 13 }}>
-          <Btn ghost onClick={() => setHhModal(false)}>Annuleren</Btn>
-          <Btn onClick={() => { dispatch({ type: "SET_PERSONS", persons: tmpP }); setHhModal(false); }}>Opslaan</Btn>
+          <Btn ghost onClick={() => setPersonsModal(false)}>Annuleren</Btn>
+          <Btn onClick={() => { dispatch({ type: "SET_PERSONS", persons: tmpP }); setPersonsModal(false); }}>Opslaan</Btn>
         </div>
       </Modal>
+
+      {/* Household modal */}
+      <HouseholdModal show={hhModal} onClose={() => setHhModal(false)} user={user} householdId={householdId} />
     </div>
+  );
+}
+
+// ─── App Root — wrapped in AuthGate ──────────────────────────────────────────
+export default function App() {
+  return (
+    <AuthGate>
+      {({ user, householdId }) => <MainApp user={user} householdId={householdId} />}
+    </AuthGate>
   );
 }
