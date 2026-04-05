@@ -16,7 +16,19 @@ const defaultState = () => ({
 function reducer(state, action) {
   const s = { ...state, inventory: [...state.inventory], shopping: [...state.shopping], week: [...state.week], recipes: [...state.recipes] };
   switch (action.type) {
-    case "REMOTE_UPDATE": return { ...s, ...action.data, tab: s.tab };
+    case "REMOTE_UPDATE": {
+      // Merge remote data into local state, but keep the local tab (each person navigates independently)
+      const remote = action.data;
+      return {
+        ...s,
+        persons:   remote.persons   ?? s.persons,
+        week:      remote.week      ?? s.week,
+        recipes:   remote.recipes   ?? s.recipes,
+        inventory: remote.inventory ?? s.inventory,
+        shopping:  remote.shopping  ?? s.shopping,
+        tab: s.tab,
+      };
+    }
     case "SET_TAB": s.tab = action.tab; break;
     case "SET_PERSONS": s.persons = Math.max(1, action.persons); break;
     case "ADD_RECIPE": s.recipes = [...s.recipes, action.recipe]; break;
@@ -350,6 +362,7 @@ function VoorraadScreen({ state, dispatch }) {
 export default function App() {
   const [state, rawDispatch] = useState(() => defaultState());
   const [syncStatus, setSyncStatus] = useState("connecting");
+  const [loaded, setLoaded] = useState(false);
   const [hhModal, setHhModal] = useState(false);
   const [tmpP, setTmpP] = useState(2);
   const pushTimer = useRef(null);
@@ -357,10 +370,17 @@ export default function App() {
   // When Firebase sends us an update, apply it
   const onRemoteUpdate = useCallback((data) => {
     rawDispatch(prev => reducer(prev, { type: "REMOTE_UPDATE", data }));
+    setLoaded(true);
     setSyncStatus("synced");
   }, []);
 
-  const onSyncStatus = useCallback((status) => setSyncStatus(status), []);
+  const onSyncStatus = useCallback((status) => {
+    setSyncStatus(status);
+    // If we get synced status but onRemoteUpdate wasn't called (empty database), still mark as loaded
+    if (status === "synced") setLoaded(true);
+    if (status === "error") setLoaded(true); // show app even on error
+  }, []);
+
   const { pushToFirebase } = useFirebaseSync(onRemoteUpdate, onSyncStatus);
 
   // Dispatch: update local state, then debounce push to Firebase
@@ -378,6 +398,20 @@ export default function App() {
   }
 
   const tab = state.tab || "week";
+
+  // Show loading spinner until Firebase has responded (prevents flash of empty state)
+  if (!loaded) {
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f5f3", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#1a1a18" }}>bood<span style={{ color: G }}>schappen</span>app</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#999", fontSize: 13 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", animation: "pulse 1s infinite" }} />
+          Verbinden met database...
+        </div>
+        <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f5f3", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#1a1a18" }}>
