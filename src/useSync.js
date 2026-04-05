@@ -1,57 +1,71 @@
 // src/useSync.js
-// Realtime sync met Firebase Realtime Database
-// Luistert naar veranderingen en pusht updates naar de cloud
-
 import { useEffect, useRef, useCallback } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getDatabase, ref, onValue, set, off } from "firebase/database";
+import { getDatabase, ref, onValue, set, off, goOnline } from "firebase/database";
 import { FIREBASE_CONFIG } from "./firebase.js";
 
-// Singleton Firebase app
 let app, db;
 function getDB() {
   if (!db) {
     app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     db = getDatabase(app);
+    goOnline(db);
   }
   return db;
 }
 
-// Keys we sync — tab is local-only (each person can be on their own tab)
 const SYNC_KEYS = ["persons", "week", "recipes", "inventory", "shopping"];
 
-export function useFirebaseSync(state, onRemoteUpdate) {
-  const ignoreNext = useRef(false); // prevent echo: we wrote → we receive → we write again
+export function useFirebaseSync(onRemoteUpdate, onSyncStatus) {
+  const ignoreNext = useRef(false);
 
-  // Listen for remote changes
   useEffect(() => {
-    const database = getDB();
+    let database;
+    try {
+      database = getDB();
+    } catch(e) {
+      console.error("Firebase init error:", e);
+      onSyncStatus("error");
+      return;
+    }
+
     const dbRef = ref(database, "boodschappenapp");
 
     const unsubscribe = onValue(dbRef, (snapshot) => {
+      // We're connected — even if database is empty, mark as synced
+      onSyncStatus("synced");
+
       if (ignoreNext.current) {
         ignoreNext.current = false;
         return;
       }
+
       const data = snapshot.val();
-      if (data) {
-        onRemoteUpdate(data);
-      }
+      if (data) onRemoteUpdate(data);
+
     }, (error) => {
-      console.error("Firebase sync error:", error);
+      console.error("Firebase listen error:", error);
+      onSyncStatus("error");
     });
 
     return () => off(dbRef, "value", unsubscribe);
-  }, [onRemoteUpdate]);
+  }, []);
 
-  // Push local changes to Firebase
-  const pushToFirebase = useCallback((state) => {
-    const database = getDB();
+  const pushToFirebase = useCallback((nextState) => {
+    let database;
+    try { database = getDB(); } catch(e) { return; }
+
     const dbRef = ref(database, "boodschappenapp");
     const payload = {};
-    SYNC_KEYS.forEach(k => { payload[k] = state[k] ?? null; });
+    SYNC_KEYS.forEach(k => { payload[k] = nextState[k] ?? null; });
     ignoreNext.current = true;
-    set(dbRef, payload).catch(err => console.error("Firebase write error:", err));
+    onSyncStatus("saving");
+    set(dbRef, payload)
+      .then(() => onSyncStatus("synced"))
+      .catch(err => {
+        console.error("Firebase write error:", err);
+        onSyncStatus("error");
+      });
   }, []);
 
   return { pushToFirebase };

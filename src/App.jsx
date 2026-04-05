@@ -128,7 +128,7 @@ function SyncDot({ synced }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
       <div style={{ width: 7, height: 7, borderRadius: "50%", background: synced ? "#639922" : "#f59e0b", transition: "background 0.5s" }} />
-      <span style={{ fontSize: 11, color: synced ? GM : "#92400e" }}>{synced ? "gesynchroniseerd" : "synchroniseert..."}</span>
+      <span style={{ fontSize: 11, color: synced ? GM : "#92400e" }}>{synced ? "gesynchroniseerd" : "verbinding maken..."}</span>
     </div>
   );
 }
@@ -355,7 +355,8 @@ export default function App() {
     setSynced(true);
   }, []);
 
-  const { pushToFirebase } = useFirebaseSync(state, onRemoteUpdate);
+  const onSyncStatus = useCallback((status) => setSynced(status), []);
+  const { pushToFirebase } = useFirebaseSync(state, onRemoteUpdate, onSyncStatus);
 
   // Dispatch: update local state, then debounce push to Firebase
   function dispatch(action) {
@@ -366,8 +367,6 @@ export default function App() {
       clearTimeout(pushTimer.current);
       pushTimer.current = setTimeout(() => {
         pushToFirebase(next);
-        setSynced(false);
-        setTimeout(() => setSynced(true), 800);
       }, 400);
       return next;
     });
@@ -385,7 +384,7 @@ export default function App() {
             {state.persons} persoon{state.persons !== 1 ? "en" : ""}
           </button>
         </div>
-        <div style={{ marginBottom: 8 }}><SyncDot synced={synced} /></div>
+        <div style={{ marginBottom: 8 }}><SyncDot status={syncStatus} /></div>
         <div style={{ display: "flex" }}>
           {[["week", "Week"], ["lijst", "Boodschappenlijst"], ["voorraad", "Voorraad"]].map(([t, l]) => (
             <button key={t} onClick={() => dispatch({ type: "SET_TAB", tab: t })}
