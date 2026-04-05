@@ -1,23 +1,22 @@
 // src/App.jsx
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { fetchAndParseRecipe, normalizeIngredientName } from "./parseRecipe.js";
+import { useFirebaseSync } from "./useSync.js";
 
 const DAYS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
-const STORAGE_KEY = "boodschapv1";
 const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11", GD = "#27500A";
 
-// ─── Storage ──────────────────────────────────────────────────────────────────
-function loadState() {
-  try { const d = localStorage.getItem(STORAGE_KEY); if (d) return JSON.parse(d); } catch (e) {}
-  return null;
-}
-function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {} }
-const defaultState = () => ({ persons: 2, week: Array(7).fill(null), recipes: [], inventory: [], shopping: [], tab: "week" });
+// ─── State ────────────────────────────────────────────────────────────────────
+const defaultState = () => ({
+  persons: 2, week: Array(7).fill(null),
+  recipes: [], inventory: [], shopping: [], tab: "week",
+});
 
 // ─── Reducer ──────────────────────────────────────────────────────────────────
 function reducer(state, action) {
   const s = { ...state, inventory: [...state.inventory], shopping: [...state.shopping], week: [...state.week], recipes: [...state.recipes] };
   switch (action.type) {
+    case "REMOTE_UPDATE": return { ...s, ...action.data, tab: s.tab };
     case "SET_TAB": s.tab = action.tab; break;
     case "SET_PERSONS": s.persons = Math.max(1, action.persons); break;
     case "ADD_RECIPE": s.recipes = [...s.recipes, action.recipe]; break;
@@ -27,8 +26,7 @@ function reducer(state, action) {
       const map = {};
       s.week.filter(Boolean).forEach(r => {
         r.ingredients.forEach(ing => {
-          // Use normalized name as key so "ui (gesneden)" and "ui" are combined
-          const k = (ing.normalizedName || normalizeIngredientName(ing.name));
+          const k = ing.normalizedName || normalizeIngredientName(ing.name);
           const scaled = Math.round(ing.amount * (s.persons / r.recipePersons) * 100) / 100;
           if (!map[k]) map[k] = { name: ing.name, normalizedName: k, amount: 0, unit: ing.unit, checked: false };
           map[k].amount += scaled;
@@ -40,7 +38,6 @@ function reducer(state, action) {
     case "TOGGLE_ITEM": s.shopping = s.shopping.map((x, i) => i === action.idx ? { ...x, checked: !x.checked } : x); break;
     case "RESET_CHECKED": s.shopping = s.shopping.map(x => ({ ...x, checked: false })); break;
     case "ADD_SHOPPING_ITEM": {
-      // If item already on list (by normalized name), add the amounts together
       const k = normalizeIngredientName(action.item.name);
       const i = s.shopping.findIndex(x => (x.normalizedName || normalizeIngredientName(x.name)) === k);
       if (i >= 0) {
@@ -66,8 +63,8 @@ function reducer(state, action) {
       break;
     }
     case "ADD_INVENTORY": {
-      const k = action.item.name.toLowerCase();
-      const i = s.inventory.findIndex(v => v.name.toLowerCase() === k);
+      const k = normalizeIngredientName(action.item.name);
+      const i = s.inventory.findIndex(v => normalizeIngredientName(v.name) === k);
       if (i >= 0) s.inventory[i] = { ...s.inventory[i], qty: Math.round((s.inventory[i].qty + action.item.qty) * 10) / 10 };
       else s.inventory = [...s.inventory, action.item];
       break;
@@ -80,16 +77,10 @@ function reducer(state, action) {
 }
 
 // ─── UI Helpers ───────────────────────────────────────────────────────────────
-function Btn({ children, onClick, disabled, full, ghost, danger }) {
-  const bg = ghost ? "none" : danger ? "#dc2626" : disabled ? "#eee" : G;
-  const color = ghost ? "#666" : disabled ? "#aaa" : "#fff";
-  const border = ghost ? "0.5px solid #ccc" : "none";
-  return (
-    <button onClick={onClick} disabled={disabled}
-      style={{ background: bg, color, border, borderRadius: 8, padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined, transition: "background 0.15s" }}>
-      {children}
-    </button>
-  );
+function Btn({ children, onClick, disabled, full, ghost }) {
+  return ghost
+    ? <button onClick={onClick} disabled={disabled} style={{ background: "none", border: "0.5px solid #ccc", borderRadius: 8, color: "#666", padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined }}>{children}</button>
+    : <button onClick={onClick} disabled={disabled} style={{ background: disabled ? "#eee" : G, color: disabled ? "#aaa" : "#fff", border: "none", borderRadius: 8, padding: "9px 15px", fontSize: 13, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600, width: full ? "100%" : undefined, transition: "background 0.15s" }}>{children}</button>;
 }
 
 function Inp({ value, onChange, placeholder, onKeyDown, type = "text", style = {} }) {
@@ -128,9 +119,16 @@ function Modal({ show, title, onClose, children }) {
 }
 
 function ProgBar({ v }) {
+  return <div style={{ height: 3, background: "#C0DD97", borderRadius: 2, margin: "9px 0", overflow: "hidden" }}>
+    <div style={{ height: "100%", background: G, borderRadius: 2, width: `${v}%`, transition: "width 0.35s ease" }} />
+  </div>;
+}
+
+function SyncDot({ synced }) {
   return (
-    <div style={{ height: 3, background: "#C0DD97", borderRadius: 2, margin: "9px 0", overflow: "hidden" }}>
-      <div style={{ height: "100%", background: G, borderRadius: 2, width: `${v}%`, transition: "width 0.35s ease" }} />
+    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+      <div style={{ width: 7, height: 7, borderRadius: "50%", background: synced ? "#639922" : "#f59e0b", transition: "background 0.5s" }} />
+      <span style={{ fontSize: 11, color: synced ? GM : "#92400e" }}>{synced ? "gesynchroniseerd" : "synchroniseert..."}</span>
     </div>
   );
 }
@@ -177,9 +175,7 @@ function WeekScreen({ state, dispatch }) {
         </div>
         {busy && <ProgBar v={prog} />}
         {msg && <div style={{ fontSize: 13, color: err ? "#dc2626" : "#777", padding: "6px 0", textAlign: "center" }}>{msg}</div>}
-        {info && !err && (
-          <div style={{ background: GL, borderRadius: 8, padding: "9px 13px", fontSize: 13, color: GM, marginTop: 9, lineHeight: 1.55 }}>{info}</div>
-        )}
+        {info && !err && <div style={{ background: GL, borderRadius: 8, padding: "9px 13px", fontSize: 13, color: GM, marginTop: 9, lineHeight: 1.55 }}>{info}</div>}
       </Card>
 
       <Card>
@@ -191,14 +187,12 @@ function WeekScreen({ state, dispatch }) {
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: 10, background: "#f8f8f6", borderRadius: 8, border: "0.5px solid rgba(0,0,0,0.08)", marginBottom: 7 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: "#999", minWidth: 28 }}>{d}</span>
               <div style={{ flex: 1, overflow: "hidden" }}>
-                {r ? (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
-                    <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>
-                      {r.recipePersons} pers. → {sc === 1 ? "geen aanpassing" : `×${sc.toFixed(2)}`} voor {state.persons} pers.
-                    </div>
-                  </>
-                ) : <span style={{ fontSize: 13, color: "#ccc" }}>Geen recept</span>}
+                {r ? <>
+                  <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
+                  <div style={{ fontSize: 11, color: "#bbb", marginTop: 2 }}>
+                    {r.recipePersons} pers. → {sc === 1 ? "geen aanpassing" : `×${sc.toFixed(2)}`} voor {state.persons} pers.
+                  </div>
+                </> : <span style={{ fontSize: 13, color: "#ccc" }}>Geen recept</span>}
               </div>
               {r
                 ? <button onClick={() => dispatch({ type: "REMOVE_DAY", idx: i })} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 3px", fontFamily: "inherit" }}>×</button>
@@ -242,10 +236,7 @@ function LijstScreen({ state, dispatch }) {
 
   function handleAdd() {
     if (!addName.trim()) return;
-    dispatch({
-      type: "ADD_SHOPPING_ITEM",
-      item: { name: addName.trim(), amount: parseFloat(addQty) || 1, unit: addUnit.trim() || "stuks" }
-    });
+    dispatch({ type: "ADD_SHOPPING_ITEM", item: { name: addName.trim(), amount: parseFloat(addQty) || 1, unit: addUnit.trim() || "stuks" } });
     setAddName(""); setAddQty(""); setAddUnit("");
   }
 
@@ -289,8 +280,6 @@ function LijstScreen({ state, dispatch }) {
           <strong style={{ fontSize: 15, color: GD }}>{done} / {state.shopping.length}</strong>
         </div>
       )}
-
-      {/* Manual add */}
       <Card mb={12}>
         <CTitle>Zelf toevoegen</CTitle>
         <div style={{ display: "flex", gap: 8 }}>
@@ -299,20 +288,15 @@ function LijstScreen({ state, dispatch }) {
           <Inp value={addUnit} onChange={e => setAddUnit(e.target.value)} placeholder="eenheid" style={{ flex: 1, maxWidth: 75 }} />
           <Btn onClick={handleAdd}>+</Btn>
         </div>
-        <div style={{ fontSize: 11, color: "#bbb", marginTop: 7 }}>
-          Staat het product al op de lijst? Dan wordt het opgeteld.
-        </div>
+        <div style={{ fontSize: 11, color: "#bbb", marginTop: 7 }}>Staat het product al op de lijst? Dan wordt het opgeteld.</div>
       </Card>
-
       {!state.shopping.length && (
         <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>
           Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.
         </div>
       )}
-
       {toGet.length > 0 && <><SLabel>Nog te halen</SLabel>{toGet.map((x, i) => <Row key={i} item={x} />)}</>}
       {got.length > 0 && <><SLabel mt={20}>In het karretje</SLabel>{got.map((x, i) => <Row key={i} item={x} />)}</>}
-
       {state.shopping.length > 0 && (
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
           <Btn ghost full onClick={() => dispatch({ type: "RESET_CHECKED" })}>Alles terugzetten</Btn>
@@ -359,15 +343,32 @@ function VoorraadScreen({ state, dispatch }) {
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const saved = loadState();
-  const [state, rawDispatch] = useState(saved ? { ...defaultState(), ...saved, tab: "week" } : { ...defaultState(), tab: "week" });
+  const [state, rawDispatch] = useState(() => defaultState());
+  const [synced, setSynced] = useState(false);
   const [hhModal, setHhModal] = useState(false);
-  const [tmpP, setTmpP] = useState(state.persons);
+  const [tmpP, setTmpP] = useState(2);
+  const pushTimer = useRef(null);
 
+  // When Firebase sends us an update, apply it
+  const onRemoteUpdate = useCallback((data) => {
+    rawDispatch(prev => reducer(prev, { type: "REMOTE_UPDATE", data }));
+    setSynced(true);
+  }, []);
+
+  const { pushToFirebase } = useFirebaseSync(state, onRemoteUpdate);
+
+  // Dispatch: update local state, then debounce push to Firebase
   function dispatch(action) {
+    if (action.type === "SET_TAB") { rawDispatch(prev => reducer(prev, action)); return; }
     rawDispatch(prev => {
       const next = reducer(prev, action);
-      saveState(next);
+      // Debounce: wait 400ms after last action before pushing (prevents spam on fast clicks)
+      clearTimeout(pushTimer.current);
+      pushTimer.current = setTimeout(() => {
+        pushToFirebase(next);
+        setSynced(false);
+        setTimeout(() => setSynced(true), 800);
+      }, 400);
       return next;
     });
   }
@@ -377,13 +378,14 @@ export default function App() {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f5f3", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#1a1a18" }}>
       <div style={{ background: "#fff", borderBottom: "0.5px solid rgba(0,0,0,0.09)", padding: "1rem 1.25rem 0", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>bood<span style={{ color: G }}>schappen</span>app</div>
           <button onClick={() => { setTmpP(state.persons); setHhModal(true); }}
             style={{ background: GL, color: GM, fontSize: 12, padding: "5px 11px", borderRadius: 20, cursor: "pointer", border: "none", fontWeight: 500, fontFamily: "inherit" }}>
             {state.persons} persoon{state.persons !== 1 ? "en" : ""}
           </button>
         </div>
+        <div style={{ marginBottom: 8 }}><SyncDot synced={synced} /></div>
         <div style={{ display: "flex" }}>
           {[["week", "Week"], ["lijst", "Boodschappenlijst"], ["voorraad", "Voorraad"]].map(([t, l]) => (
             <button key={t} onClick={() => dispatch({ type: "SET_TAB", tab: t })}
