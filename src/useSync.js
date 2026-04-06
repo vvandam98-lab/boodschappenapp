@@ -120,20 +120,23 @@ export async function getHouseholdMeta(householdId) {
 
 export async function leaveHousehold(userId, householdId) {
   const database = getDB();
-  const { remove } = await import("firebase/database");
+  const { get, set } = await import("firebase/database");
 
-  // Remove user from members list
-  await remove(ref(database, `householdMeta/${householdId}/members/${userId}`));
+  const isOwner = householdId === `hh_${userId}`;
 
-  // If user was the owner (hh_{userId}), also clean up the invite code
-  if (householdId === `hh_${userId}`) {
-    const { get } = await import("firebase/database");
+  if (isOwner) {
+    // Owner deletes everything — invite code, all data, all members
     const metaSnap = await get(ref(database, `householdMeta/${householdId}`));
     if (metaSnap.exists()) {
       const code = metaSnap.val().inviteCode;
-      if (code) await remove(ref(database, `inviteCodes/${code}`));
+      if (code) await set(ref(database, `inviteCodes/${code}`), null);
     }
-    await remove(ref(database, `householdMeta/${householdId}`));
-    await remove(ref(database, `households/${householdId}`));
+    // Set to null = delete in Firebase Realtime Database
+    await set(ref(database, `households/${householdId}`), null);
+    await set(ref(database, `householdMeta/${householdId}`), null);
+  } else {
+    // Member: only removes themselves from the members list
+    // Data stays intact for the owner, member just loses access
+    await set(ref(database, `householdMeta/${householdId}/members/${userId}`), null);
   }
 }

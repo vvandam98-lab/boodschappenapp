@@ -240,8 +240,8 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
             </div>
             <div style={{ fontSize: 12, color: "#7f1d1d", marginBottom: 12, lineHeight: 1.5 }}>
               {isOwner
-                ? "Je bent de eigenaar. Het hele huishouden inclusief alle data wordt verwijderd voor alle leden."
-                : "Je verlaat het huishouden. Je kunt daarna een nieuw aanmaken of een andere uitnodigingscode invoeren."}
+                ? "Je bent de eigenaar. Het hele huishouden én alle data worden permanent verwijderd voor iedereen."
+                : "Je verlaat het huishouden. De data blijft bewaard voor de eigenaar, maar jij hebt er geen toegang meer toe. Je kunt daarna een nieuw huishouden aanmaken of ergens anders bij aansluiten."}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setConfirming(false)} style={{ flex: 1, padding: "8px", background: "none", border: "0.5px solid #ccc", borderRadius: 7, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Annuleren</button>

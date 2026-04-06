@@ -3,13 +3,18 @@
     "households": {
       "$householdId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && $householdId === ('hh_' + auth.uid) || root.child('householdMeta').child($householdId).child('members').child(auth.uid).exists()"
       }
     },
     "householdMeta": {
       "$householdId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        "members": {
+          "$userId": {
+            ".write": "auth != null && (auth.uid === $userId || $householdId === ('hh_' + auth.uid))"
+          }
+        },
+        ".write": "auth != null && $householdId === ('hh_' + auth.uid)"
       }
     },
     "inviteCodes": {
