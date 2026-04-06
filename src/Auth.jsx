@@ -1,17 +1,31 @@
 // src/Auth.jsx — Login & household setup screens
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { FIREBASE_CONFIG } from "./firebase.js";
 import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta, leaveHousehold } from "./useSync.js";
 
 let authInstance;
+let persistenceSet = false;
 function getAuthInstance() {
   if (!authInstance) {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     authInstance = getAuth(app);
   }
   return authInstance;
+}
+
+async function getAuthReady() {
+  const auth = getAuthInstance();
+  if (!persistenceSet) {
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      persistenceSet = true;
+    } catch(e) {
+      console.warn("Could not set persistence:", e);
+    }
+  }
+  return auth;
 }
 
 const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11";
@@ -44,7 +58,7 @@ function LoginScreen({ onLogin }) {
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
-      const auth = getAuthInstance();
+      const auth = await getAuthReady();
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       const result = await signInWithPopup(auth, provider);
