@@ -117,3 +117,23 @@ export async function getHouseholdMeta(householdId) {
   const snap = await get(ref(database, `householdMeta/${householdId}`));
   return snap.exists() ? snap.val() : null;
 }
+
+export async function leaveHousehold(userId, householdId) {
+  const database = getDB();
+  const { remove } = await import("firebase/database");
+
+  // Remove user from members list
+  await remove(ref(database, `householdMeta/${householdId}/members/${userId}`));
+
+  // If user was the owner (hh_{userId}), also clean up the invite code
+  if (householdId === `hh_${userId}`) {
+    const { get } = await import("firebase/database");
+    const metaSnap = await get(ref(database, `householdMeta/${householdId}`));
+    if (metaSnap.exists()) {
+      const code = metaSnap.val().inviteCode;
+      if (code) await remove(ref(database, `inviteCodes/${code}`));
+    }
+    await remove(ref(database, `householdMeta/${householdId}`));
+    await remove(ref(database, `households/${householdId}`));
+  }
+}

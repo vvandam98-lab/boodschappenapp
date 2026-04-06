@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { FIREBASE_CONFIG } from "./firebase.js";
-import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta } from "./useSync.js";
+import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta, leaveHousehold } from "./useSync.js";
 
 let authInstance;
 function getAuthInstance() {
@@ -170,11 +170,14 @@ function HouseholdScreen({ user, onReady }) {
 // ─── Household Info Modal ─────────────────────────────────────────────────────
 export function HouseholdModal({ show, onClose, user, householdId }) {
   const [meta, setMeta] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (show && householdId) {
       getHouseholdMeta(householdId).then(setMeta);
     }
+    if (!show) setConfirming(false);
   }, [show, householdId]);
 
   if (!show) return null;
@@ -185,7 +188,20 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
     window.location.reload();
   }
 
+  async function handleLeave() {
+    setBusy(true);
+    try {
+      await leaveHousehold(user.uid, householdId);
+      window.location.reload();
+    } catch(e) {
+      console.error("Leave error:", e);
+      setBusy(false);
+      setConfirming(false);
+    }
+  }
+
   const members = meta?.members ? Object.values(meta.members) : [];
+  const isOwner = householdId === `hh_${user.uid}`;
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.38)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: "1.25rem" }}>
@@ -216,8 +232,32 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-          <button onClick={handleSignOut} style={{ fontSize: 13, color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Uitloggen</button>
+        {/* Leave household confirmation */}
+        {confirming ? (
+          <div style={{ background: "#fff5f5", border: "0.5px solid #fecaca", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#991b1b", marginBottom: 6 }}>
+              {isOwner ? "Huishouden verwijderen?" : "Huishouden verlaten?"}
+            </div>
+            <div style={{ fontSize: 12, color: "#7f1d1d", marginBottom: 12, lineHeight: 1.5 }}>
+              {isOwner
+                ? "Je bent de eigenaar. Het hele huishouden inclusief alle data wordt verwijderd voor alle leden."
+                : "Je verlaat het huishouden. Je kunt daarna een nieuw aanmaken of een andere uitnodigingscode invoeren."}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirming(false)} style={{ flex: 1, padding: "8px", background: "none", border: "0.5px solid #ccc", borderRadius: 7, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Annuleren</button>
+              <button onClick={handleLeave} disabled={busy} style={{ flex: 1, padding: "8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: busy ? "default" : "pointer", fontFamily: "inherit" }}>
+                {busy ? "Bezig..." : isOwner ? "Verwijderen" : "Verlaten"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setConfirming(true)} style={{ width: "100%", padding: "9px", background: "none", border: "0.5px solid #fca5a5", borderRadius: 8, fontSize: 13, color: "#dc2626", cursor: "pointer", fontFamily: "inherit", marginBottom: 12 }}>
+            {isOwner ? "Huishouden verwijderen" : "Huishouden verlaten"}
+          </button>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <button onClick={handleSignOut} style={{ fontSize: 13, color: "#999", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Uitloggen</button>
           <Btn ghost onClick={onClose}>Sluiten</Btn>
         </div>
       </div>
