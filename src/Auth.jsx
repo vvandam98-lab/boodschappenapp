@@ -1,7 +1,7 @@
 // src/Auth.jsx — Login & household setup screens
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { FIREBASE_CONFIG } from "./firebase.js";
 import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta } from "./useSync.js";
 
@@ -40,56 +40,29 @@ function Inp({ value, onChange, placeholder, style = {} }) {
 function LoginScreen({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [checking, setChecking] = useState(true);
-
-  // On mount: check if we just came back from a Google redirect
-  useEffect(() => {
-    const auth = getAuthInstance();
-    getRedirectResult(auth)
-      .then(result => {
-        if (result?.user) {
-          onLogin(result.user);
-        } else {
-          setChecking(false);
-        }
-      })
-      .catch(e => {
-        console.error("Redirect result error:", e);
-        setChecking(false);
-      });
-  }, []);
 
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
       const auth = getAuthInstance();
       const provider = new GoogleAuthProvider();
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile) {
-        await signInWithRedirect(auth, provider);
-        return; // page reloads, code below never runs
-      } else {
-        const result = await signInWithPopup(auth, provider);
-        onLogin(result.user);
-      }
+      provider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(auth, provider);
+      onLogin(result.user);
     } catch (e) {
-      setErr("Inloggen mislukt. Probeer opnieuw.");
+      if (e.code === "auth/popup-blocked") {
+        setErr("Popup geblokkeerd door je browser. Sta popups toe voor deze site en probeer opnieuw.");
+      } else if (e.code === "auth/cancelled-popup-request" || e.code === "auth/popup-closed-by-user") {
+        // User closed popup — no error needed
+      } else {
+        setErr("Inloggen mislukt: " + (e.message || "probeer opnieuw"));
+      }
       setBusy(false);
     }
   }
 
-  // Show loading while checking redirect result
-  if (checking) {
-    return (
-      <div style={{ maxWidth: 380, margin: "0 auto", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", gap: 16 }}>
-        <div style={{ fontSize: 24, fontWeight: 700 }}>bood<span style={{ color: G }}>schappen</span>app</div>
-        <div style={{ fontSize: 13, color: "#aaa" }}>Inloggen...</div>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ maxWidth: 380, margin: "0 auto", padding: "3rem 1.5rem", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+    <div style={{ maxWidth: 380, margin: "0 auto", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem 1.5rem", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
         <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>bood<span style={{ color: G }}>schappen</span>app</div>
         <div style={{ fontSize: 14, color: "#888", lineHeight: 1.6 }}>Plan je week, maak boodschappenlijsten<br />en shop samen met je partner</div>
@@ -97,7 +70,12 @@ function LoginScreen({ onLogin }) {
       <Btn google full onClick={handleGoogle} disabled={busy}>
         {busy ? "Bezig..." : "Inloggen met Google"}
       </Btn>
-      {err && <div style={{ fontSize: 13, color: "#dc2626", textAlign: "center", marginTop: 12 }}>{err}</div>}
+      {err && (
+        <div style={{ fontSize: 13, color: "#dc2626", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>{err}</div>
+      )}
+      <div style={{ fontSize: 11, color: "#bbb", textAlign: "center", marginTop: 16, lineHeight: 1.6 }}>
+        Er opent een Google-venster.<br />Sta popups toe als je browser hierom vraagt.
+      </div>
     </div>
   );
 }
