@@ -26,6 +26,7 @@ function reducer(state, action) {
     case "ADD_RECIPE": s.recipes = [...s.recipes, action.recipe]; break;
     case "ASSIGN_DAY": s.week = s.week.map((r, i) => i === action.idx ? action.recipe : r); break;
     case "REMOVE_DAY": s.week = s.week.map((r, i) => i === action.idx ? null : r); break;
+    case "CLEAR_WEEK": s.week = Array(7).fill(null); s.recipes = []; break;
     case "BUILD_SHOPPING": {
       const map = {};
       s.week.filter(Boolean).forEach(r => {
@@ -200,6 +201,28 @@ function WeekScreen({ state, dispatch }) {
         if (!state.week.filter(Boolean).length) { alert("Voeg eerst recepten toe."); return; }
         dispatch({ type: "BUILD_SHOPPING" }); dispatch({ type: "SET_TAB", tab: "lijst" });
       }}>Maak boodschappenlijst voor deze week</Btn>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <Btn ghost onClick={() => {
+          // Share week menu via WhatsApp
+          const DAGnamen = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"];
+          const lines = DAGnamen.map((dag, i) => {
+            const r = state.week[i];
+            return `${dag}: ${r ? r.name : "Geen recept ingevuld"}`;
+          });
+          const tekst = "De volgende week staat dit op het menu:\n\n" + lines.join("\n");
+          const encoded = encodeURIComponent(tekst);
+          window.open(`https://wa.me/?text=${encoded}`, "_blank");
+        }}>Week delen via WhatsApp</Btn>
+
+        <Btn ghost onClick={() => {
+          if (state.week.filter(Boolean).length === 0) { alert("Er staan nog geen recepten in de weekplanning."); return; }
+          if (window.confirm("Weet je zeker dat je de huidige week wilt afsluiten? De weekplanning wordt geleegd.")) {
+            dispatch({ type: "CLEAR_WEEK" });
+          }
+        }}>Nieuwe week beginnen</Btn>
+      </div>
+
       <Modal show={dayModal !== null} title={dayModal !== null ? `Recept voor ${DAYS[dayModal]}dag` : ""} onClose={() => setDayModal(null)}>
         {!state.recipes.length ? <p style={{ fontSize: 13, color: "#bbb" }}>Analyseer eerst een recept-URL hierboven.</p>
           : state.recipes.map((r, ri) => (

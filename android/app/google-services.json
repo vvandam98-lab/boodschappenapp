@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "52803396691",
+    "firebase_url": "https://boodschappenapp-7070e-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "boodschappenapp-7070e",
+    "storage_bucket": "boodschappenapp-7070e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:52803396691:android:b0d740e87500234a4292a6",
+        "android_client_info": {
+          "package_name": "com.vin.boodschappenapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "52803396691-etvff34qv99qu81q4s3j810f3anjb97l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vin.boodschappenapp",
+            "certificate_hash": "a1771d454cf62737272ff237e8cf818cfd541f06"
+          }
+        },
+        {
+          "client_id": "52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDR7Cv7XeAZxcCgI7b6KL1aVataSHvTubQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

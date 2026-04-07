@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Boodschappenapp</string>
+    <string name="title_activity_main">Boodschappenapp</string>
+    <string name="package_name">com.vvandam.boodschappenapp</string>
+    <string name="custom_url_scheme">com.vvandam.boodschappenapp</string>
+</resources>

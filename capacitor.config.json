@@ -1,0 +1,20 @@
+{
+  "appId": "com.vin.boodschappenapp",
+  "appName": "Boodschappenapp",
+  "webDir": "dist",
+  "plugins": {
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "serverClientId": "52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#ffffff",
+      "overlaysWebView": false
+    },
+    "EdgeToEdge": {
+      "backgroundColor": "#f5f5f3"
+    }
+  }
+}
