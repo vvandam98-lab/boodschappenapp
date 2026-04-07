@@ -1,38 +1,28 @@
-// src/Auth.jsx — Login & household setup screens
+// src/Auth.jsx
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
 import { FIREBASE_CONFIG } from "./firebase.js";
 import { createHousehold, joinHousehold, getUserHousehold, getHouseholdMeta, leaveHousehold } from "./useSync.js";
 
+const WEB_CLIENT_ID = "52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com";
+
+const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11";
+
 let authInstance;
-let persistenceSet = false;
-function getAuthInstance() {
+async function getAuthReady() {
   if (!authInstance) {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     authInstance = getAuth(app);
+    try { await setPersistence(authInstance, browserLocalPersistence); } catch(e) {}
   }
   return authInstance;
 }
 
-async function getAuthReady() {
-  const auth = getAuthInstance();
-  if (!persistenceSet) {
-    try {
-      await setPersistence(auth, browserLocalPersistence);
-      persistenceSet = true;
-    } catch(e) {
-      console.warn("Could not set persistence:", e);
-    }
-  }
-  return auth;
-}
-
-const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11";
-
 function Btn({ children, onClick, disabled, full, ghost, google }) {
   if (google) return (
-    <button onClick={onClick} disabled={disabled} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#fff", border: "1.5px solid #ddd", borderRadius: 10, padding: "11px 20px", fontSize: 15, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 500, width: full ? "100%" : undefined, transition: "box-shadow 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+    <button onClick={onClick} disabled={disabled} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#fff", border: "1.5px solid #ddd", borderRadius: 10, padding: "11px 20px", fontSize: 15, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 500, width: full ? "100%" : undefined, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
       <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
       {children}
     </button>
@@ -58,18 +48,38 @@ function LoginScreen({ onLogin }) {
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
-      const auth = await getAuthReady();
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      const result = await signInWithPopup(auth, provider);
-      onLogin(result.user);
-    } catch (e) {
-      if (e.code === "auth/popup-blocked") {
-        setErr("Popup geblokkeerd door je browser. Sta popups toe voor deze site en probeer opnieuw.");
-      } else if (e.code === "auth/cancelled-popup-request" || e.code === "auth/popup-closed-by-user") {
-        // User closed popup — no error needed
+      const isNative = Capacitor.isNativePlatform();
+
+      if (isNative) {
+        // Native Android — use Capacitor Google Auth plugin
+        const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
+        await GoogleAuth.initialize({
+          clientId: WEB_CLIENT_ID,
+          scopes: ["profile", "email"],
+          grantOfflineAccess: true,
+        });
+        const googleUser = await GoogleAuth.signIn();
+        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        const auth = await getAuthReady();
+        const result = await signInWithCredential(auth, credential);
+        onLogin(result.user);
       } else {
-        setErr("Inloggen mislukt: " + (e.message || "probeer opnieuw"));
+        // Web — use popup
+        const { signInWithPopup } = await import("firebase/auth");
+        const auth = await getAuthReady();
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        const result = await signInWithPopup(auth, provider);
+        onLogin(result.user);
+      }
+    } catch (e) {
+      console.error("Login error:", e);
+      if (e.code === "auth/popup-blocked") {
+        setErr("Popup geblokkeerd. Sta popups toe voor deze site.");
+      } else if (e.code === "auth/cancelled-popup-request" || e.code === "auth/popup-closed-by-user") {
+        // user cancelled, no error
+      } else {
+        setErr("Inloggen mislukt. Probeer opnieuw.");
       }
       setBusy(false);
     }
@@ -84,33 +94,26 @@ function LoginScreen({ onLogin }) {
       <Btn google full onClick={handleGoogle} disabled={busy}>
         {busy ? "Bezig..." : "Inloggen met Google"}
       </Btn>
-      {err && (
-        <div style={{ fontSize: 13, color: "#dc2626", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>{err}</div>
-      )}
-      <div style={{ fontSize: 11, color: "#bbb", textAlign: "center", marginTop: 16, lineHeight: 1.6 }}>
-        Er opent een Google-venster.<br />Sta popups toe als je browser hierom vraagt.
-      </div>
+      {err && <div style={{ fontSize: 13, color: "#dc2626", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>{err}</div>}
     </div>
   );
 }
 
 // ─── Household Setup Screen ───────────────────────────────────────────────────
 function HouseholdScreen({ user, onReady }) {
-  const [mode, setMode] = useState(null); // "create" | "join"
+  const [mode, setMode] = useState(null);
   const [inviteCode, setInviteCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [created, setCreated] = useState(null); // { inviteCode }
+  const [created, setCreated] = useState(null);
 
   async function handleCreate() {
     setBusy(true); setErr("");
     try {
       const { householdId, inviteCode } = await createHousehold(user.uid, user.displayName);
       setCreated({ inviteCode });
-      setTimeout(() => onReady(householdId), 0);
-    } catch (e) {
-      setErr("Aanmaken mislukt: " + e.message);
-    }
+      setTimeout(() => onReady(householdId), 1500);
+    } catch (e) { setErr("Aanmaken mislukt: " + e.message); }
     setBusy(false);
   }
 
@@ -120,9 +123,7 @@ function HouseholdScreen({ user, onReady }) {
     try {
       const householdId = await joinHousehold(user.uid, user.displayName, inviteCode.trim());
       onReady(householdId);
-    } catch (e) {
-      setErr(e.message);
-    }
+    } catch (e) { setErr(e.message); }
     setBusy(false);
   }
 
@@ -131,7 +132,7 @@ function HouseholdScreen({ user, onReady }) {
       <div style={{ maxWidth: 380, margin: "0 auto", padding: "3rem 1.5rem", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 16 }}>🎉</div>
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Huishouden aangemaakt!</div>
-        <div style={{ fontSize: 14, color: "#666", marginBottom: 24 }}>Stuur deze code naar je partner zodat hij/zij kan aansluiten:</div>
+        <div style={{ fontSize: 14, color: "#666", marginBottom: 24 }}>Deel deze code met je partner:</div>
         <div style={{ background: GL, borderRadius: 12, padding: "20px", marginBottom: 24 }}>
           <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 6, color: GM }}>{created.inviteCode}</div>
         </div>
@@ -146,7 +147,6 @@ function HouseholdScreen({ user, onReady }) {
         <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>bood<span style={{ color: G }}>schappen</span>app</div>
         <div style={{ fontSize: 14, color: "#888" }}>Welkom, {user.displayName?.split(" ")[0]}!</div>
       </div>
-
       {!mode ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ fontSize: 14, color: "#555", textAlign: "center", marginBottom: 8 }}>Hoe wil je beginnen?</div>
@@ -161,9 +161,7 @@ function HouseholdScreen({ user, onReady }) {
         </div>
       ) : mode === "create" ? (
         <div>
-          <div style={{ fontSize: 14, color: "#555", marginBottom: 20, lineHeight: 1.6 }}>
-            Je maakt een nieuw huishouden aan. Je krijgt een uitnodigingscode die je met je partner kunt delen.
-          </div>
+          <div style={{ fontSize: 14, color: "#555", marginBottom: 20, lineHeight: 1.6 }}>Je maakt een nieuw huishouden aan en krijgt een uitnodigingscode voor je partner.</div>
           <Btn full onClick={handleCreate} disabled={busy}>{busy ? "Aanmaken..." : "Huishouden aanmaken"}</Btn>
           {err && <div style={{ fontSize: 13, color: "#dc2626", marginTop: 10 }}>{err}</div>}
           <div style={{ marginTop: 12 }}><Btn ghost onClick={() => setMode(null)}>Terug</Btn></div>
@@ -188,16 +186,14 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (show && householdId) {
-      getHouseholdMeta(householdId).then(setMeta);
-    }
+    if (show && householdId) getHouseholdMeta(householdId).then(setMeta);
     if (!show) setConfirming(false);
   }, [show, householdId]);
 
   if (!show) return null;
 
   async function handleSignOut() {
-    const auth = getAuthInstance();
+    const auth = await getAuthReady();
     await signOut(auth);
     window.location.reload();
   }
@@ -221,7 +217,6 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.38)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: "1.25rem" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, border: "0.5px solid rgba(0,0,0,0.09)", padding: "1.4rem", width: "100%", maxWidth: 360 }}>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Huishouden</div>
-
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Leden</div>
           {members.map((name, i) => (
@@ -234,7 +229,6 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
             </div>
           ))}
         </div>
-
         {meta?.inviteCode && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Uitnodigingscode</div>
@@ -242,11 +236,9 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
               <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 4, color: GM }}>{meta.inviteCode}</span>
               <button onClick={() => navigator.clipboard?.writeText(meta.inviteCode)} style={{ fontSize: 12, color: GM, background: "none", border: `0.5px solid ${G}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>Kopieer</button>
             </div>
-            <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>Deel deze code met je partner om samen te werken</div>
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>Deel deze code met je partner</div>
           </div>
         )}
-
-        {/* Leave household confirmation */}
         {confirming ? (
           <div style={{ background: "#fff5f5", border: "0.5px solid #fecaca", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "#991b1b", marginBottom: 6 }}>
@@ -254,8 +246,8 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
             </div>
             <div style={{ fontSize: 12, color: "#7f1d1d", marginBottom: 12, lineHeight: 1.5 }}>
               {isOwner
-                ? "Je bent de eigenaar. Het hele huishouden én alle data worden permanent verwijderd voor iedereen."
-                : "Je verlaat het huishouden. De data blijft bewaard voor de eigenaar, maar jij hebt er geen toegang meer toe. Je kunt daarna een nieuw huishouden aanmaken of ergens anders bij aansluiten."}
+                ? "Je bent de eigenaar. Het hele huishouden inclusief alle data wordt permanent verwijderd voor iedereen."
+                : "Je verlaat het huishouden. De data blijft bewaard voor de eigenaar, maar jij hebt er geen toegang meer toe."}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setConfirming(false)} style={{ flex: 1, padding: "8px", background: "none", border: "0.5px solid #ccc", borderRadius: 7, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Annuleren</button>
@@ -269,7 +261,6 @@ export function HouseholdModal({ show, onClose, user, householdId }) {
             {isOwner ? "Huishouden verwijderen" : "Huishouden verlaten"}
           </button>
         )}
-
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <button onClick={handleSignOut} style={{ fontSize: 13, color: "#999", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Uitloggen</button>
           <Btn ghost onClick={onClose}>Sluiten</Btn>
@@ -287,25 +278,20 @@ export function useAuth() {
   const [needsHousehold, setNeedsHousehold] = useState(false);
 
   useEffect(() => {
-    const auth = getAuthInstance();
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        setUser(u);
-        const hid = await getUserHousehold(u.uid);
-        if (hid) {
-          setHouseholdId(hid);
-          setNeedsHousehold(false);
+    getAuthReady().then(auth => {
+      const unsub = onAuthStateChanged(auth, async (u) => {
+        if (u) {
+          setUser(u);
+          const hid = await getUserHousehold(u.uid);
+          if (hid) { setHouseholdId(hid); setNeedsHousehold(false); }
+          else setNeedsHousehold(true);
         } else {
-          setNeedsHousehold(true);
+          setUser(null); setHouseholdId(null); setNeedsHousehold(false);
         }
-      } else {
-        setUser(null);
-        setHouseholdId(null);
-        setNeedsHousehold(false);
-      }
-      setAuthReady(true);
+        setAuthReady(true);
+      });
+      return () => unsub();
     });
-    return () => unsub();
   }, []);
 
   function onHouseholdReady(hid) {
@@ -316,7 +302,7 @@ export function useAuth() {
   return { user, householdId, authReady, needsHousehold, onHouseholdReady };
 }
 
-// ─── Auth Gate — wraps the whole app ─────────────────────────────────────────
+// ─── Auth Gate ────────────────────────────────────────────────────────────────
 export function AuthGate({ children }) {
   const { user, householdId, authReady, needsHousehold, onHouseholdReady } = useAuth();
 
