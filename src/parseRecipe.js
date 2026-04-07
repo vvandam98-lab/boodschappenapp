@@ -113,6 +113,45 @@ export function fromHtmlSelectors(html) {
   return null;
 }
 
+
+export function fromPicnic(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  // Picnic puts ingredient name in alt attribute of img, amount+unit in next text node
+  // Pattern: <img alt="rundergehakt"> ... "500 g"
+  const imgs = [...doc.querySelectorAll('img[alt]')];
+  const ingredients = [];
+
+  imgs.forEach(img => {
+    const name = img.getAttribute("alt")?.trim();
+    if (!name || name.length < 2) return;
+
+    // Walk siblings to find the amount text
+    let el = img.parentElement;
+    if (!el) return;
+    const text = el.textContent.trim();
+
+    // Match "500 g" or "2 stuks" or "1 el" at end of text block
+    const m = text.match(/(\d+(?:[.,]\d+)?)\s*([a-zA-Z]+(?:\s+[a-zA-Z]+)?)\s*$/);
+    if (m) {
+      const amount = parseFloat(m[1].replace(",", ".")) || 1;
+      const unit = m[2].trim();
+      // Skip obviously non-ingredient images (logos, arrows etc)
+      if (name.toLowerCase().includes("arrow") || name.toLowerCase().includes("back")) return;
+      ingredients.push({ name, normalizedName: normalizeIngredientName(name), amount, unit });
+    }
+  });
+
+  if (ingredients.length < 2) return null;
+
+  // Get recipe name from h1
+  const nameEl = doc.querySelector("h1");
+  const name = nameEl?.textContent.replace(/\*/g, "").trim() || "Recept";
+
+  // Picnic doesn't show persons count — default to 4
+  return { name, recipePersons: 4, ingredients: ingredients.slice(0, 15) };
+}
+
 export async function fetchAndParseRecipe(url) {
   const apiUrl = `/api/fetch-recipe?url=${encodeURIComponent(url)}`;
   const res = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
@@ -122,7 +161,7 @@ export async function fetchAndParseRecipe(url) {
   }
   const html = await res.text();
   if (!html || html.length < 100) throw new Error("Lege pagina ontvangen");
-  const recipe = fromJsonLd(html) || fromHtmlSelectors(html);
+  const recipe = fromJsonLd(html) || fromHtmlSelectors(html) || fromPicnic(html);
   if (recipe) return recipe;
   throw new Error("Geen receptgegevens gevonden op deze pagina. Niet alle sites worden ondersteund.");
 }
