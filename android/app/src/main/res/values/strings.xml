@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Boodschappenapp</string>
     <string name="title_activity_main">Boodschappenapp</string>
-    <string name="package_name">com.vvandam.boodschappenapp</string>
-    <string name="custom_url_scheme">com.vvandam.boodschappenapp</string>
+    <string name="package_name">com.vin.boodschappenapp</string>
+    <string name="custom_url_scheme">com.vin.boodschappenapp</string>
+    <string name="server_client_id">52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com</string>
 </resources>

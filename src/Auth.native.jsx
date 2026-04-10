@@ -1,9 +1,8 @@
-// src/Auth.native.jsx — Android/Native versie van de login (Capacitor Google Auth)
+// src/Auth.native.jsx — Android/Native versie van de login (Capacitor Social Login)
 // Deze file wordt ALLEEN gebruikt op de android branch
 
 import { useState } from "react";
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
-import { Capacitor } from "@capacitor/core";
 import { getAuthReady, G, Btn, HouseholdScreen, HouseholdModal, useAuth, LoadingScreen } from "./auth-shared.jsx";
 
 export const WEB_CLIENT_ID = "52803396691-7m0lr5crtr656odohmvju2d29q2fj24c.apps.googleusercontent.com";
@@ -15,17 +14,20 @@ function LoginScreen({ onLogin }) {
   async function handleGoogle() {
     setBusy(true); setErr("");
     try {
-      const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
-      await GoogleAuth.initialize({
-        clientId: WEB_CLIENT_ID,
-        scopes: ["profile", "email"],
-        grantOfflineAccess: true,
+      const { SocialLogin } = await import("@capgo/capacitor-social-login");
+      await SocialLogin.initialize({
+        google: {
+          webClientId: WEB_CLIENT_ID,
+        }
       });
-      const googleUser = await GoogleAuth.signIn();
-      const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+      const result = await SocialLogin.login({
+        provider: "google",
+        options: { scopes: ["profile", "email"] }
+      });
+      const credential = GoogleAuthProvider.credential(result.result.idToken);
       const auth = await getAuthReady();
-      const result = await signInWithCredential(auth, credential);
-      onLogin(result.user);
+      const firebaseResult = await signInWithCredential(auth, credential);
+      onLogin(firebaseResult.user);
     } catch (e) {
       console.error("Native login error:", e);
       setErr("Inloggen mislukt. Probeer opnieuw.");

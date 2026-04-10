@@ -7,6 +7,74 @@ import { AuthGate, HouseholdModal } from "./Auth.jsx";
 const DAYS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 const G = "#639922", GL = "#EAF3DE", GM = "#3B6D11", GD = "#27500A";
 
+// ─── Supermarkt categorieën ───────────────────────────────────────────────────
+const CATEGORIEEN = [
+  { id: 1, label: "🛒 Groente & fruit" },
+  { id: 2, label: "🍞 Brood & bakkerij" },
+  { id: 3, label: "🥩 Vlees, vis & kaas" },
+  { id: 4, label: "🧊 Koeling & zuivel" },
+  { id: 5, label: "❄️ Diepvries" },
+  { id: 6, label: "🥫 Houdbaar & droog" },
+  { id: 7, label: "🧼 Non-food & huishoudelijk" },
+  { id: 8, label: "🍫 Overig" },
+];
+
+async function categoriseerItems(items) {
+  // items = array van { name, normalizedName }
+  // Geeft terug: { [normalizedName]: categorieId }
+  if (!items.length) return {};
+
+  const lijst = items.map((x, i) => `${i + 1}. ${x.name}`).join("\n");
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: `Categoriseer elk boodschappenitem in exact één van deze supermarktcategorieën:
+1 = Groente & fruit (vers)
+2 = Brood & bakkerij
+3 = Vlees, vis, kaas & vleeswaren
+4 = Koeling & zuivel (melk, yoghurt, sappen, kant-en-klaar)
+5 = Diepvries
+6 = Houdbaar & droog (pasta, rijst, conserven, sauzen, snacks, frisdrank)
+7 = Non-food & huishoudelijk (schoonmaak, toiletpapier, verzorging)
+8 = Overig / kassa
+
+Items:
+${lijst}
+
+Reageer ALLEEN met JSON in dit formaat, geen uitleg:
+{"1": 4, "2": 6, "3": 1}
+(sleutel = regelnummer, waarde = categorienummer)`
+      }]
+    })
+  });
+
+  const data = await response.json();
+  const text = data.content?.[0]?.text || "{}";
+
+  let mapping = {};
+  try {
+    const clean = text.replace(/```json|```/g, "").trim();
+    mapping = JSON.parse(clean);
+  } catch (e) {
+    console.error("Categoriseer parse error:", e);
+    return {};
+  }
+
+  // Koppel terug aan normalizedName
+  const result = {};
+  items.forEach((item, i) => {
+    const cat = mapping[String(i + 1)];
+    if (cat) result[item.normalizedName] = Number(cat);
+  });
+  return result;
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 const defaultState = () => ({
   persons: 2, week: Array(7).fill(null),
@@ -26,18 +94,25 @@ function reducer(state, action) {
     case "ADD_RECIPE": s.recipes = [...s.recipes, action.recipe]; break;
     case "ASSIGN_DAY": s.week = s.week.map((r, i) => i === action.idx ? action.recipe : r); break;
     case "REMOVE_DAY": s.week = s.week.map((r, i) => i === action.idx ? null : r); break;
-    case "CLEAR_WEEK": s.week = Array(7).fill(null); s.recipes = []; break;
     case "BUILD_SHOPPING": {
       const map = {};
       s.week.filter(Boolean).forEach(r => {
         r.ingredients.forEach(ing => {
           const k = ing.normalizedName || normalizeIngredientName(ing.name);
           const scaled = Math.round(ing.amount * (s.persons / r.recipePersons) * 100) / 100;
-          if (!map[k]) map[k] = { name: ing.name, normalizedName: k, amount: 0, unit: ing.unit, checked: false };
+          if (!map[k]) map[k] = { name: ing.name, normalizedName: k, amount: 0, unit: ing.unit, checked: false, category: null };
           map[k].amount += scaled;
         });
       });
       s.shopping = Object.values(map).map(x => ({ ...x, amount: Math.round(x.amount * 10) / 10 }));
+      break;
+    }
+    case "SET_CATEGORIES": {
+      // Koppel categorieën terug aan shopping items
+      s.shopping = s.shopping.map(item => {
+        const cat = action.mapping[item.normalizedName || normalizeIngredientName(item.name)];
+        return cat ? { ...item, category: cat } : item;
+      });
       break;
     }
     case "TOGGLE_ITEM": s.shopping = s.shopping.map((x, i) => i === action.idx ? { ...x, checked: !x.checked } : x); break;
@@ -46,7 +121,7 @@ function reducer(state, action) {
       const k = normalizeIngredientName(action.item.name);
       const i = s.shopping.findIndex(x => (x.normalizedName || normalizeIngredientName(x.name)) === k);
       if (i >= 0) s.shopping = s.shopping.map((x, idx) => idx === i ? { ...x, amount: Math.round((x.amount + action.item.amount) * 10) / 10 } : x);
-      else s.shopping = [...s.shopping, { ...action.item, normalizedName: k, checked: false }];
+      else s.shopping = [...s.shopping, { ...action.item, normalizedName: k, checked: false, category: action.item.category || null }];
       break;
     }
     case "REMOVE_SHOPPING_ITEM": s.shopping = s.shopping.filter((_, i) => i !== action.idx); break;
@@ -201,28 +276,6 @@ function WeekScreen({ state, dispatch }) {
         if (!state.week.filter(Boolean).length) { alert("Voeg eerst recepten toe."); return; }
         dispatch({ type: "BUILD_SHOPPING" }); dispatch({ type: "SET_TAB", tab: "lijst" });
       }}>Maak boodschappenlijst voor deze week</Btn>
-
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <Btn ghost onClick={() => {
-          // Share week menu via WhatsApp
-          const DAGnamen = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"];
-          const lines = DAGnamen.map((dag, i) => {
-            const r = state.week[i];
-            return `${dag}: ${r ? r.name : "Geen recept ingevuld"}`;
-          });
-          const tekst = "De volgende week staat dit op het menu:\n\n" + lines.join("\n");
-          const encoded = encodeURIComponent(tekst);
-          window.open(`https://wa.me/?text=${encoded}`, "_blank");
-        }}>Week delen via WhatsApp</Btn>
-
-        <Btn ghost onClick={() => {
-          if (state.week.filter(Boolean).length === 0) { alert("Er staan nog geen recepten in de weekplanning."); return; }
-          if (window.confirm("Weet je zeker dat je de huidige week wilt afsluiten? De weekplanning wordt geleegd.")) {
-            dispatch({ type: "CLEAR_WEEK" });
-          }
-        }}>Nieuwe week beginnen</Btn>
-      </div>
-
       <Modal show={dayModal !== null} title={dayModal !== null ? `Recept voor ${DAYS[dayModal]}dag` : ""} onClose={() => setDayModal(null)}>
         {!state.recipes.length ? <p style={{ fontSize: 13, color: "#bbb" }}>Analyseer eerst een recept-URL hierboven.</p>
           : state.recipes.map((r, ri) => (
@@ -241,18 +294,71 @@ function WeekScreen({ state, dispatch }) {
 // ─── Lijst Screen ─────────────────────────────────────────────────────────────
 function LijstScreen({ state, dispatch }) {
   const [addName, setAddName] = useState(""), [addQty, setAddQty] = useState(""), [addUnit, setAddUnit] = useState("");
+  const [categorising, setCategorising] = useState(false);
 
-  function handleAdd() {
+  // Categoriseer items die nog geen categorie hebben
+  async function categoriseerOntbrekende(shopping) {
+    const zonder = shopping.filter(x => !x.category);
+    if (!zonder.length) return;
+    setCategorising(true);
+    try {
+      const mapping = await categoriseerItems(zonder);
+      if (Object.keys(mapping).length) {
+        dispatch({ type: "SET_CATEGORIES", mapping });
+      }
+    } catch (e) {
+      console.error("Categoriseren mislukt:", e);
+    }
+    setCategorising(false);
+  }
+
+  // Categoriseer bij mount en als shopping verandert
+  const prevShoppingRef = useRef(null);
+  const shoppingJson = JSON.stringify(state.shopping.map(x => x.normalizedName));
+  if (prevShoppingRef.current !== shoppingJson) {
+    prevShoppingRef.current = shoppingJson;
+    const ongecategoriseerd = state.shopping.filter(x => !x.category);
+    if (ongecategoriseerd.length > 0 && !categorising) {
+      categoriseerOntbrekende(state.shopping);
+    }
+  }
+
+  async function handleAdd() {
     if (!addName.trim()) return;
-    dispatch({ type: "ADD_SHOPPING_ITEM", item: { name: addName.trim(), amount: parseFloat(addQty) || 1, unit: addUnit.trim() || "stuks" } });
+    const name = addName.trim();
+    const normalizedName = normalizeIngredientName(name);
+
+    // Categoriseer het nieuwe item direct
+    let category = null;
+    try {
+      const mapping = await categoriseerItems([{ name, normalizedName }]);
+      category = mapping[normalizedName] || null;
+    } catch (e) { /* stil falen is ok */ }
+
+    dispatch({ type: "ADD_SHOPPING_ITEM", item: { name, amount: parseFloat(addQty) || 1, unit: addUnit.trim() || "stuks", category } });
     setAddName(""); setAddQty(""); setAddUnit("");
   }
 
   const invMap = {};
   state.inventory.forEach(v => { invMap[normalizeIngredientName(v.name)] = v; });
   const done = state.shopping.filter(x => x.checked).length;
-  const toGet = state.shopping.filter(x => !x.checked);
-  const got = state.shopping.filter(x => x.checked);
+
+  // Groepeer items op categorie, gesorteerd op categorievolgorde
+  const teHalen = state.shopping.filter(x => !x.checked);
+  const gehaald = state.shopping.filter(x => x.checked);
+
+  // Groepeer te-halen items per categorie
+  const groepenMap = {};
+  teHalen.forEach(item => {
+    const catId = item.category || 8;
+    if (!groepenMap[catId]) groepenMap[catId] = [];
+    groepenMap[catId].push(item);
+  });
+
+  // Sorteer groepen op categorievolgorde
+  const groepen = CATEGORIEEN
+    .map(cat => ({ cat, items: groepenMap[cat.id] || [] }))
+    .filter(g => g.items.length > 0);
 
   function Row({ item }) {
     const idx = state.shopping.indexOf(item);
@@ -283,7 +389,10 @@ function LijstScreen({ state, dispatch }) {
     <div style={{ padding: "1rem" }}>
       {state.shopping.length > 0 && (
         <div style={{ background: GL, borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <span style={{ fontSize: 13, color: GM }}>Afgestreept</span>
+          <span style={{ fontSize: 13, color: GM }}>
+            Afgestreept
+            {categorising && <span style={{ marginLeft: 8, color: "#aaa", fontSize: 12 }}>🛒 Sorteren...</span>}
+          </span>
           <strong style={{ fontSize: 15, color: GD }}>{done} / {state.shopping.length}</strong>
         </div>
       )}
@@ -297,9 +406,31 @@ function LijstScreen({ state, dispatch }) {
         </div>
         <div style={{ fontSize: 11, color: "#bbb", marginTop: 7 }}>Staat het product al op de lijst? Dan wordt het opgeteld.</div>
       </Card>
-      {!state.shopping.length && <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.</div>}
-      {toGet.length > 0 && <><SLabel>Nog te halen</SLabel>{toGet.map((x, i) => <Row key={i} item={x} />)}</>}
-      {got.length > 0 && <><SLabel mt={20}>In het karretje</SLabel>{got.map((x, i) => <Row key={i} item={x} />)}</>}
+
+      {!state.shopping.length && (
+        <div style={{ textAlign: "center", padding: "2rem 1rem", color: "#ccc", fontSize: 14, lineHeight: 1.7 }}>
+          Nog niets op de lijst.<br />Voeg recepten toe via de Week-tab<br />of voeg zelf producten toe hierboven.
+        </div>
+      )}
+
+      {/* Te halen — gegroepeerd per supermarktafdeling */}
+      {groepen.map(({ cat, items }) => (
+        <div key={cat.id}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#555", margin: "16px 0 8px", paddingLeft: 2 }}>
+            {cat.label}
+          </div>
+          {items.map((x, i) => <Row key={i} item={x} />)}
+        </div>
+      ))}
+
+      {/* In het karretje */}
+      {gehaald.length > 0 && (
+        <>
+          <SLabel mt={20}>In het karretje</SLabel>
+          {gehaald.map((x, i) => <Row key={i} item={x} />)}
+        </>
+      )}
+
       {state.shopping.length > 0 && (
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
           <Btn ghost full onClick={() => dispatch({ type: "RESET_CHECKED" })}>Alles terugzetten</Btn>
@@ -398,7 +529,6 @@ function MainApp({ user, householdId }) {
               style={{ background: GL, color: GM, fontSize: 12, padding: "5px 11px", borderRadius: 20, cursor: "pointer", border: "none", fontWeight: 500, fontFamily: "inherit" }}>
               {state.persons} persoon{state.persons !== 1 ? "en" : ""}
             </button>
-            {/* Avatar button → household modal */}
             <button onClick={() => setHhModal(true)} style={{ width: 30, height: 30, borderRadius: "50%", background: GL, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600, color: GM }}>
               {user.displayName?.charAt(0).toUpperCase()}
             </button>
